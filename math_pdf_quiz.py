@@ -4,7 +4,6 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
-import base64
 import pandas as pd
 import streamlit as st
 
@@ -17,8 +16,8 @@ try:
 except Exception:
     JST = timezone(timedelta(hours=9))
 
-st.set_page_config(page_title="関数テスト（問題→解説→採点）", layout="wide")
-st.title("関数テスト（問題→解説→採点）")
+st.set_page_config(page_title="数学（数字入力）", layout="wide")
+st.markdown("<h2 style='font-size:14pt;'>数学（数字入力）</h2>", unsafe_allow_html=True)
 
 # ==============
 # ユーティリティ
@@ -58,9 +57,6 @@ def seconds_to_hms(sec: int) -> str:
         return f"{h}時間{m}分{s}秒"
     return f"{m}分{s}秒"
 
-# ======================
-# PDF 表示（Chrome対応）
-# ======================
 def show_pdf(file_path: Path):
     """Chromeブロックを回避して安全にPDFを開く／保存する"""
     try:
@@ -72,7 +68,7 @@ def show_pdf(file_path: Path):
             file_name=file_path.name,
             mime="application/pdf"
         )
-        st.caption("※ ボタンをクリックするとPDFが別タブで開くか保存できます（Chrome対応）")
+        st.caption("※ボタンをクリックするとPDFが開くか保存できます（Chrome対応）")
     except Exception as e:
         st.error(f"PDFの表示に失敗しました: {e}")
 
@@ -144,9 +140,6 @@ def get_current_id() -> Optional[int]:
 def rows_for_id(i: int) -> pd.DataFrame:
     return answer_df[answer_df["ID"] == str(i)].sort_values(by=["小問"], key=lambda s: s.astype(str))
 
-def download_button_bytes(label: str, data: bytes, file_name: str, mime: str = "application/octet-stream"):
-    st.download_button(label, data=data, file_name=file_name, mime=mime)
-
 # =======================
 # 画面：問題（Problem UI）
 # =======================
@@ -155,53 +148,28 @@ def render_problem(i: int):
     elapsed = int(time.time() - ss.problem_start_time)
     st.caption(f"経過時間：{seconds_to_hms(elapsed)}　｜　累計時間：{seconds_to_hms(int(time.time() - ss.start_time))}")
 
-    colA, colB = st.columns([4,1])
-    with colA:
-        if i in problems:
-            st.write(f"PDF: {problems[i].name}")
-            show_pdf(problems[i])
-        else:
-            st.info("このIDに対応する問題PDFが見つかりませんでした。")
-
-    with colB:
-        if i in problems:
-            download_button_bytes("問題DL", problems[i].read_bytes(), problems[i].name, "application/pdf")
+    if i in problems:
+        st.write(f"PDF: {problems[i].name}")
+        show_pdf(problems[i])
+    else:
+        st.info("このIDに対応する問題PDFが見つかりませんでした。")
 
     st.divider()
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("解答記入", use_container_width=True):
+        if st.button("解答記入", use_container_width=True, key=f"btn_ans_{i}"):
             ss.phase = "solution"
+            st.rerun()
     with c2:
-        if st.button("問題パス（解説へ）", use_container_width=True):
-            ss.phase = "solution"
-    st.stop()
-
-# =======================
-# 画面：解説（Solution UI）
-# =======================
-def render_solution(i: int):
-    st.subheader(f"解説 {i}")
-
-    rows = rows_for_id(i)
-    video_links = [as_str(u) for u in rows["解説動画"].tolist() if isinstance(u, str) and u.strip()]
-    colTop = st.columns([1,1,1,4])
-    with colTop[0]:
-        if video_links:
-            st.link_button("解説動画", video_links[0])
-    with colTop[1]:
-        if i in solutions:
-            download_button_bytes("解説DL", solutions[i].read_bytes(), solutions[i].name, "application/pdf")
-    with colTop[2]:
-        if st.button("次の問題", use_container_width=True):
-            ss.current_id_idx += 1
-            if ss.current_id_idx >= len(available_ids):
-                ss.phase = "end"
-            else:
-                ss.phase = "problem"
-                ss.problem_start_time = time.time()
+        if st.button("問題パス（解説へ）", use_container_width=True, key=f"btn_skip_{i}"):
+            ss.phase = "explain"
             st.rerun()
 
+# =======================
+# 画面：解説（Explain UI）
+# =======================
+def render_explain(i: int):
+    st.subheader(f"解説 {i}")
     if i in solutions:
         st.write(f"PDF: {solutions[i].name}")
         show_pdf(solutions[i])
@@ -209,7 +177,21 @@ def render_solution(i: int):
         st.info("このIDに対応する解説PDFが見つかりませんでした。")
 
     st.divider()
-    st.markdown("#### 解答記入欄")
+    if st.button("次の問題へ", type="primary"):
+        ss.current_id_idx += 1
+        if ss.current_id_idx >= len(available_ids):
+            ss.phase = "end"
+        else:
+            ss.phase = "problem"
+            ss.problem_start_time = time.time()
+        st.rerun()
+
+# =======================
+# 画面：解答（Solution UI）
+# =======================
+def render_solution(i: int):
+    st.subheader(f"解答記入 {i}")
+    rows = rows_for_id(i)
 
     for _, r in rows.iterrows():
         sub = as_str(r["小問"])
@@ -229,32 +211,36 @@ def render_solution(i: int):
             if result:
                 st.write(result)
 
-    cA, cB = st.columns([1,3])
-    with cA:
-        if st.button("採点", type="primary", use_container_width=True):
-            per_problem_elapsed = int(time.time() - ss.problem_start_time)
-            total_elapsed = int(time.time() - ss.start_time)
-            for _, r in rows.iterrows():
-                sub = as_str(r["小問"])
-                key = (str(i), sub)
-                user_inp = ss.answers.get(key, {}).get("入力", "").strip()
-                correct = as_str(r["答え"]).strip()
-                judge = "正解！" if user_inp == correct else "不正解"
-                ss.answers[key] = {
-                    "入力": user_inp,
-                    "正解": correct,
-                    "判定": judge,
-                    "経過秒": per_problem_elapsed,
-                    "累計秒": total_elapsed,
-                    "難易度": as_str(r["問題レベル"]),
-                    "タイトル": as_str(r["タイトル"]),
-                }
-            st.rerun()
-    with cB:
-        st.caption("※『採点』を押すと各欄の右に 判定（正解/不正解） が表示されます。")
+    if st.button("採点", type="primary"):
+        per_problem_elapsed = int(time.time() - ss.problem_start_time)
+        total_elapsed = int(time.time() - ss.start_time)
+        for _, r in rows.iterrows():
+            sub = as_str(r["小問"])
+            key = (str(i), sub)
+            user_inp = ss.answers.get(key, {}).get("入力", "").strip()
+            correct = as_str(r["答え"]).strip()
+            judge = "正解！" if user_inp == correct else "不正解"
+            ss.answers[key] = {
+                "入力": user_inp,
+                "正解": correct,
+                "判定": judge,
+                "経過秒": per_problem_elapsed,
+                "累計秒": total_elapsed,
+                "難易度": as_str(r["問題レベル"]),
+                "タイトル": as_str(r["タイトル"]),
+            }
+        st.rerun()
 
     st.divider()
-    st.button("終了", use_container_width=True, on_click=lambda: setattr(ss, "phase", "end"))
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("解説を見る"):
+            ss.phase = "explain"
+            st.rerun()
+    with c2:
+        if st.button("終了"):
+            ss.phase = "end"
+            st.rerun()
 
 # =======================
 # 画面：終了（Export UI）
@@ -279,7 +265,6 @@ def render_end():
             "ID": ID,
         })
     result_df = pd.DataFrame(rows, columns=["タイトル","小問","難易度","正誤","経過時間","累計時間","入力","正解","ID"])
-
     st.dataframe(result_df, use_container_width=True, hide_index=True)
 
     if ss.user_name:
@@ -308,5 +293,7 @@ if ss.phase == "problem":
     render_problem(current_id)
 elif ss.phase == "solution":
     render_solution(current_id)
+elif ss.phase == "explain":
+    render_explain(current_id)
 else:
     render_end()
