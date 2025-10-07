@@ -1,7 +1,6 @@
 import os
 import io
 import time
-import webbrowser
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
@@ -59,24 +58,20 @@ def seconds_to_hms(sec: int) -> str:
     return f"{m}分{s}秒"
 
 # ======================
-# PDFダウンロード関数（DL後に別タブで開く）
+# PDFダウンロード関数（DL後にボタン表示）
 # ======================
 def show_download_button(file_path: Path):
-    """PDFをダウンロードしたら別タブで開く"""
+    """PDFをダウンロードのみ（ブラウザ自動オープンなし）"""
     with open(file_path, "rb") as f:
         data = f.read()
     if st.download_button(
-        label=f"📘 {file_path.name} をダウンロードして開く",
+        label=f"📘 {file_path.name} をダウンロード",
         data=data,
         file_name=file_path.name,
         mime="application/pdf",
         key=f"dl_{file_path.name}"
     ):
         ss.pdf_downloaded = True
-        try:
-            webbrowser.open_new_tab(file_path.absolute().as_uri())
-        except Exception:
-            pass
         st.rerun()
 
 # ======================
