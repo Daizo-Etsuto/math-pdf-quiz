@@ -1,11 +1,10 @@
 import os
 import io
 import time
-import base64
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
-
+import base64
 import pandas as pd
 import streamlit as st
 
@@ -59,23 +58,23 @@ def seconds_to_hms(sec: int) -> str:
         return f"{h}時間{m}分{s}秒"
     return f"{m}分{s}秒"
 
+# ======================
+# PDF 表示（Chrome対応）
+# ======================
 def show_pdf(file_path: Path):
-    """PDFをStreamlit内で安全に埋め込み表示（Chrome対応版）"""
+    """Chromeブロックを回避して安全にPDFを開く／保存する"""
     try:
         with open(file_path, "rb") as f:
-            base64_pdf = base64.b64encode(f.read()).decode('utf-8')
-        pdf_display = f"""
-            <iframe 
-                src="data:application/pdf;base64,{base64_pdf}#toolbar=1" 
-                width="100%" height="800px"
-                type="application/pdf"
-                style="border:none;">
-            </iframe>
-        """
-        st.markdown(pdf_display, unsafe_allow_html=True)
+            data = f.read()
+        st.download_button(
+            label=f"📘 {file_path.name} を開く／ダウンロード",
+            data=data,
+            file_name=file_path.name,
+            mime="application/pdf"
+        )
+        st.caption("※ ボタンをクリックするとPDFが別タブで開くか保存できます（Chrome対応）")
     except Exception as e:
-        st.warning(f"PDFの表示に失敗しました: {e}")
-        st.download_button("PDFを開く／ダウンロード", file_path.read_bytes(), file_name=file_path.name)
+        st.error(f"PDFの表示に失敗しました: {e}")
 
 # ======================
 # ルートの PDF / CSV 収集
@@ -160,7 +159,7 @@ def render_problem(i: int):
     with colA:
         if i in problems:
             st.write(f"PDF: {problems[i].name}")
-            show_pdf(problems[i])  # ← 修正版（PDF埋め込み）
+            show_pdf(problems[i])
         else:
             st.info("このIDに対応する問題PDFが見つかりませんでした。")
 
@@ -205,7 +204,7 @@ def render_solution(i: int):
 
     if i in solutions:
         st.write(f"PDF: {solutions[i].name}")
-        show_pdf(solutions[i])  # ← 修正版（PDF埋め込み）
+        show_pdf(solutions[i])
     else:
         st.info("このIDに対応する解説PDFが見つかりませんでした。")
 
@@ -311,5 +310,3 @@ elif ss.phase == "solution":
     render_solution(current_id)
 else:
     render_end()
-
-
