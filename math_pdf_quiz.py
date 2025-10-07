@@ -59,11 +59,23 @@ def seconds_to_hms(sec: int) -> str:
         return f"{h}時間{m}分{s}秒"
     return f"{m}分{s}秒"
 
-# PDFをブラウザに埋め込み表示
 def show_pdf(file_path: Path):
-    """Chromeブロック回避：別タブで開くリンク"""
-    abs_path = os.path.abspath(file_path)
-    st.markdown(f"[📖 PDFを開く（別タブ）]({abs_path})", unsafe_allow_html=True)
+    """PDFをStreamlit内で安全に埋め込み表示（Chrome対応版）"""
+    try:
+        with open(file_path, "rb") as f:
+            base64_pdf = base64.b64encode(f.read()).decode('utf-8')
+        pdf_display = f"""
+            <iframe 
+                src="data:application/pdf;base64,{base64_pdf}#toolbar=1" 
+                width="100%" height="800px"
+                type="application/pdf"
+                style="border:none;">
+            </iframe>
+        """
+        st.markdown(pdf_display, unsafe_allow_html=True)
+    except Exception as e:
+        st.warning(f"PDFの表示に失敗しました: {e}")
+        st.download_button("PDFを開く／ダウンロード", file_path.read_bytes(), file_name=file_path.name)
 
 # ======================
 # ルートの PDF / CSV 収集
@@ -299,4 +311,5 @@ elif ss.phase == "solution":
     render_solution(current_id)
 else:
     render_end()
+
 
