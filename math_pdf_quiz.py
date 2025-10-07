@@ -61,10 +61,9 @@ def seconds_to_hms(sec: int) -> str:
 
 # PDFをブラウザに埋め込み表示
 def show_pdf(file_path: Path):
-    with open(file_path, "rb") as f:
-        base64_pdf = base64.b64encode(f.read()).decode('utf-8')
-    pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="800px" type="application/pdf"></iframe>'
-    st.markdown(pdf_display, unsafe_allow_html=True)
+    """Chromeブロック回避：別タブで開くリンク"""
+    abs_path = os.path.abspath(file_path)
+    st.markdown(f"[📖 PDFを開く（別タブ）]({abs_path})", unsafe_allow_html=True)
 
 # ======================
 # ルートの PDF / CSV 収集
@@ -300,3 +299,4 @@ elif ss.phase == "solution":
     render_solution(current_id)
 else:
     render_end()
+
