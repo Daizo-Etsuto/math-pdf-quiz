@@ -59,57 +59,53 @@ def seconds_to_hms(sec: int) -> str:
     return f"{m}分{s}秒"
 
 # ======================
-# PDF 表示と自動オープン
+# PDFダウンロード関数（DL後に別タブで開く）
 # ======================
-def download_and_open_pdf(file_path: Path):
-    """PDFをDL＋別タブで自動オープン"""
+def show_download_button(file_path: Path):
+    """PDFをダウンロードしたら別タブで開く"""
     with open(file_path, "rb") as f:
         data = f.read()
-    st.download_button(
+    if st.download_button(
         label=f"📘 {file_path.name} をダウンロードして開く",
         data=data,
         file_name=file_path.name,
         mime="application/pdf",
         key=f"dl_{file_path.name}"
-    )
-    # Chromeなどの環境で別タブを開く
-    try:
-        webbrowser.open_new_tab(file_path.absolute().as_uri())
-    except Exception:
-        pass
+    ):
+        ss.pdf_downloaded = True
+        try:
+            webbrowser.open_new_tab(file_path.absolute().as_uri())
+        except Exception:
+            pass
+        st.rerun()
 
 # ======================
-# データ読み込み
+# ファイル収集
 # ======================
 root = "."
 pdfs = find_files(root, (".pdf",))
 csvs = find_files(root, (".csv",))
-
-problems: Dict[int, Path] = {}
-solutions: Dict[int, Path] = {}
+problems, solutions = {}, {}
 
 for p in pdfs:
     name = p.stem
     if name.startswith("問題"):
         try:
-            n = int(name.replace("問題", ""))
-            problems[n] = p
+            problems[int(name.replace("問題", ""))] = p
         except Exception:
             pass
     elif name.startswith("解答") or name.startswith("解説"):
         try:
-            n = int(name.replace("解答", "").replace("解説", ""))
-            solutions[n] = p
+            solutions[int(name.replace("解答", "").replace("解説", ""))] = p
         except Exception:
             pass
 
 answer_df = load_answer_csv(csvs)
 if answer_df is None:
-    st.error("ルートにCSV（解答仕様）が見つかりませんでした。")
+    st.error("ルートにCSVが見つかりません。")
     st.stop()
 
-required_cols = ["タイトル", "ID", "小問", "問題レベル", "答え", "解説動画"]
-for col in required_cols:
+for col in ["タイトル","ID","小問","問題レベル","答え","解説動画"]:
     if col not in answer_df.columns:
         answer_df[col] = pd.NA
 
@@ -119,25 +115,17 @@ answer_df["答え"] = answer_df["答え"].apply(as_str)
 available_ids = sorted({int(x) for x in answer_df["ID"].unique() if str(x).isdigit()})
 
 # =================
-# セッション状態管理
+# セッション管理
 # =================
 ss = st.session_state
-if "phase" not in ss:
-    ss.phase = "problem"
-if "current_id_idx" not in ss:
-    ss.current_id_idx = 0
-if "start_time" not in ss:
-    ss.start_time = time.time()
-if "problem_start_time" not in ss:
-    ss.problem_start_time = time.time()
-if "answers" not in ss:
-    ss.answers = {}
-if "user_name" not in ss:
-    ss.user_name = ""
-if "pdf_opened" not in ss:
-    ss.pdf_opened = False
-if "graded" not in ss:
-    ss.graded = False
+ss.setdefault("phase", "problem")
+ss.setdefault("current_id_idx", 0)
+ss.setdefault("start_time", time.time())
+ss.setdefault("problem_start_time", time.time())
+ss.setdefault("answers", {})
+ss.setdefault("user_name", "")
+ss.setdefault("pdf_downloaded", False)
+ss.setdefault("graded", False)
 
 def get_current_id():
     if not available_ids:
@@ -158,13 +146,13 @@ def render_problem(i: int):
     st.caption(f"経過時間：{seconds_to_hms(elapsed)}　｜　累計時間：{seconds_to_hms(int(time.time() - ss.start_time))}")
 
     if i in problems:
-        download_and_open_pdf(problems[i])
-        ss.pdf_opened = True
+        show_download_button(problems[i])
     else:
         st.info("問題PDFが見つかりません。")
 
-    # DL後にボタンを表示
-    if ss.pdf_opened:
+    # DL完了後にボタンを表示
+    if ss.pdf_downloaded:
+        st.divider()
         c1, c2 = st.columns([1,1])
         with c1:
             if st.button("解答記入", use_container_width=True):
@@ -177,7 +165,7 @@ def render_problem(i: int):
                 st.rerun()
 
 # =======================
-# 解答入力・採点
+# 解答・採点
 # =======================
 def render_solution(i: int):
     st.subheader(f"解答記入 {i}")
@@ -222,7 +210,6 @@ def render_solution(i: int):
         ss.graded = True
         st.rerun()
 
-    # 採点後に解説へボタンを表示
     if ss.graded:
         st.divider()
         if st.button("解説を見る ▶"):
@@ -230,30 +217,26 @@ def render_solution(i: int):
             st.rerun()
 
 # =======================
-# 解説表示
+# 解説画面
 # =======================
 def render_explain(i: int):
     st.subheader(f"解説 {i}")
     rows = rows_for_id(i)
-
-    # CSV内に動画リンクがあれば表示
     video_links = [as_str(v) for v in rows["解説動画"].tolist() if isinstance(v, str) and v.strip()]
     if video_links:
         st.markdown(f"[🎬 解説動画を見る]({video_links[0]})", unsafe_allow_html=True)
 
     if i in solutions:
-        download_and_open_pdf(solutions[i])
+        show_download_button(solutions[i])
     else:
         st.info("解説PDFが見つかりません。")
 
     st.divider()
-
-    # 次の問題または終了
     if ss.current_id_idx + 1 < len(available_ids):
         if st.button("次の問題へ ▶"):
             ss.current_id_idx += 1
             ss.problem_start_time = time.time()
-            ss.pdf_opened = False
+            ss.pdf_downloaded = False
             ss.phase = "problem"
             st.rerun()
     else:
@@ -266,8 +249,7 @@ def render_explain(i: int):
 # =======================
 def render_end():
     st.subheader("終了")
-    st.write("結果をダウンロードできます。")
-
+    st.write("結果のCSVをダウンロードできます。")
     ss.user_name = st.text_input("氏名を入力してください", value=ss.user_name)
     rows = []
     for (ID, sub), rec in ss.answers.items():
@@ -292,7 +274,7 @@ def render_end():
         df.to_csv(buf, index=False, encoding="utf-8-sig")
         st.download_button("結果CSVをダウンロード", buf.getvalue().encode("utf-8-sig"), file_name=filename, mime="text/csv")
     else:
-        st.info("氏名を入力するとCSVをダウンロードできます。")
+        st.info("氏名を入力するとダウンロードできます。")
 
     st.button("はじめから", on_click=lambda: ss.clear())
 
