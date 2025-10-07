@@ -58,7 +58,7 @@ def seconds_to_hms(sec: int) -> str:
     return f"{m}分{s}秒"
 
 # ======================
-# PDFダウンロード関数（DL後にボタン表示）
+# PDFダウンロード関数
 # ======================
 def show_download_button(file_path: Path):
     """PDFをダウンロードのみ（ブラウザ自動オープンなし）"""
@@ -145,7 +145,6 @@ def render_problem(i: int):
     else:
         st.info("問題PDFが見つかりません。")
 
-    # DL完了後にボタンを表示
     if ss.pdf_downloaded:
         st.divider()
         c1, c2 = st.columns([1,1])
@@ -240,12 +239,18 @@ def render_explain(i: int):
         st.rerun()
 
 # =======================
-# 終了画面
+# 終了画面（★氏名欄を半幅に）
 # =======================
 def render_end():
     st.subheader("終了")
     st.write("結果のCSVをダウンロードできます。")
-    ss.user_name = st.text_input("氏名を入力してください", value=ss.user_name)
+
+    col1, col2 = st.columns([1,1])
+    with col1:
+        ss.user_name = st.text_input("氏名を入力してください", value=ss.user_name, placeholder="例）千葉 太郎")
+    with col2:
+        st.write("　")  # 右側を空ける（デザイン調整）
+
     rows = []
     for (ID, sub), rec in ss.answers.items():
         rows.append({
