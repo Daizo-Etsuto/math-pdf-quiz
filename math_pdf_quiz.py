@@ -1,6 +1,7 @@
 import os
 import io
 import time
+import webbrowser
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
@@ -8,7 +9,7 @@ import pandas as pd
 import streamlit as st
 
 # =========================
-# 基本設定（JST とタイトル）
+# 基本設定
 # =========================
 try:
     from zoneinfo import ZoneInfo
@@ -17,7 +18,7 @@ except Exception:
     JST = timezone(timedelta(hours=9))
 
 st.set_page_config(page_title="数学（数字入力）", layout="wide")
-st.markdown("<h2 style='font-size:14pt;'>数学（数字入力）</h2>", unsafe_allow_html=True)
+st.markdown("<h1 style='font-size:20pt;'>数学（数字入力）</h1>", unsafe_allow_html=True)
 
 # ==============
 # ユーティリティ
@@ -57,23 +58,28 @@ def seconds_to_hms(sec: int) -> str:
         return f"{h}時間{m}分{s}秒"
     return f"{m}分{s}秒"
 
-def show_pdf(file_path: Path):
-    """Chromeブロックを回避して安全にPDFを開く／保存する"""
+# ======================
+# PDF 表示と自動オープン
+# ======================
+def download_and_open_pdf(file_path: Path):
+    """PDFをDL＋別タブで自動オープン"""
+    with open(file_path, "rb") as f:
+        data = f.read()
+    st.download_button(
+        label=f"📘 {file_path.name} をダウンロードして開く",
+        data=data,
+        file_name=file_path.name,
+        mime="application/pdf",
+        key=f"dl_{file_path.name}"
+    )
+    # Chromeなどの環境で別タブを開く
     try:
-        with open(file_path, "rb") as f:
-            data = f.read()
-        st.download_button(
-            label=f"📘 {file_path.name} を開く／ダウンロード",
-            data=data,
-            file_name=file_path.name,
-            mime="application/pdf"
-        )
-        st.caption("※ボタンをクリックするとPDFが開くか保存できます（Chrome対応）")
-    except Exception as e:
-        st.error(f"PDFの表示に失敗しました: {e}")
+        webbrowser.open_new_tab(file_path.absolute().as_uri())
+    except Exception:
+        pass
 
 # ======================
-# ルートの PDF / CSV 収集
+# データ読み込み
 # ======================
 root = "."
 pdfs = find_files(root, (".pdf",))
@@ -98,11 +104,11 @@ for p in pdfs:
             pass
 
 answer_df = load_answer_csv(csvs)
-
-required_cols = ["タイトル", "ID", "小問", "問題レベル", "答え", "解説動画", "解答時間", "累計時間"]
 if answer_df is None:
     st.error("ルートにCSV（解答仕様）が見つかりませんでした。")
     st.stop()
+
+required_cols = ["タイトル", "ID", "小問", "問題レベル", "答え", "解説動画"]
 for col in required_cols:
     if col not in answer_df.columns:
         answer_df[col] = pd.NA
@@ -110,7 +116,6 @@ for col in required_cols:
 answer_df["ID"] = answer_df["ID"].astype(str)
 answer_df["小問"] = answer_df["小問"].astype(str)
 answer_df["答え"] = answer_df["答え"].apply(as_str)
-
 available_ids = sorted({int(x) for x in answer_df["ID"].unique() if str(x).isdigit()})
 
 # =================
@@ -129,65 +134,50 @@ if "answers" not in ss:
     ss.answers = {}
 if "user_name" not in ss:
     ss.user_name = ""
+if "pdf_opened" not in ss:
+    ss.pdf_opened = False
+if "graded" not in ss:
+    ss.graded = False
 
-def get_current_id() -> Optional[int]:
+def get_current_id():
     if not available_ids:
         return None
     if ss.current_id_idx < 0 or ss.current_id_idx >= len(available_ids):
         return None
     return available_ids[ss.current_id_idx]
 
-def rows_for_id(i: int) -> pd.DataFrame:
+def rows_for_id(i: int):
     return answer_df[answer_df["ID"] == str(i)].sort_values(by=["小問"], key=lambda s: s.astype(str))
 
 # =======================
-# 画面：問題（Problem UI）
+# 問題画面
 # =======================
 def render_problem(i: int):
-    st.subheader(f"問題 {i}")
+    st.markdown(f"<h2 style='font-size:20pt;'>問題 {i}</h2>", unsafe_allow_html=True)
     elapsed = int(time.time() - ss.problem_start_time)
     st.caption(f"経過時間：{seconds_to_hms(elapsed)}　｜　累計時間：{seconds_to_hms(int(time.time() - ss.start_time))}")
 
     if i in problems:
-        st.write(f"PDF: {problems[i].name}")
-        show_pdf(problems[i])
+        download_and_open_pdf(problems[i])
+        ss.pdf_opened = True
     else:
-        st.info("このIDに対応する問題PDFが見つかりませんでした。")
+        st.info("問題PDFが見つかりません。")
 
-    st.divider()
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("解答記入", use_container_width=True, key=f"btn_ans_{i}"):
-            ss.phase = "solution"
-            st.rerun()
-    with c2:
-        if st.button("問題パス（解説へ）", use_container_width=True, key=f"btn_skip_{i}"):
-            ss.phase = "explain"
-            st.rerun()
-
-# =======================
-# 画面：解説（Explain UI）
-# =======================
-def render_explain(i: int):
-    st.subheader(f"解説 {i}")
-    if i in solutions:
-        st.write(f"PDF: {solutions[i].name}")
-        show_pdf(solutions[i])
-    else:
-        st.info("このIDに対応する解説PDFが見つかりませんでした。")
-
-    st.divider()
-    if st.button("次の問題へ", type="primary"):
-        ss.current_id_idx += 1
-        if ss.current_id_idx >= len(available_ids):
-            ss.phase = "end"
-        else:
-            ss.phase = "problem"
-            ss.problem_start_time = time.time()
-        st.rerun()
+    # DL後にボタンを表示
+    if ss.pdf_opened:
+        c1, c2 = st.columns([1,1])
+        with c1:
+            if st.button("解答記入", use_container_width=True):
+                ss.phase = "solution"
+                ss.graded = False
+                st.rerun()
+        with c2:
+            if st.button("問題パス", use_container_width=True):
+                ss.phase = "explain"
+                st.rerun()
 
 # =======================
-# 画面：解答（Solution UI）
+# 解答入力・採点
 # =======================
 def render_solution(i: int):
     st.subheader(f"解答記入 {i}")
@@ -212,7 +202,7 @@ def render_solution(i: int):
                 st.write(result)
 
     if st.button("採点", type="primary"):
-        per_problem_elapsed = int(time.time() - ss.problem_start_time)
+        per_elapsed = int(time.time() - ss.problem_start_time)
         total_elapsed = int(time.time() - ss.start_time)
         for _, r in rows.iterrows():
             sub = as_str(r["小問"])
@@ -224,70 +214,97 @@ def render_solution(i: int):
                 "入力": user_inp,
                 "正解": correct,
                 "判定": judge,
-                "経過秒": per_problem_elapsed,
+                "経過秒": per_elapsed,
                 "累計秒": total_elapsed,
                 "難易度": as_str(r["問題レベル"]),
                 "タイトル": as_str(r["タイトル"]),
             }
+        ss.graded = True
         st.rerun()
 
-    st.divider()
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("解説を見る"):
+    # 採点後に解説へボタンを表示
+    if ss.graded:
+        st.divider()
+        if st.button("解説を見る ▶"):
             ss.phase = "explain"
-            st.rerun()
-    with c2:
-        if st.button("終了"):
-            ss.phase = "end"
             st.rerun()
 
 # =======================
-# 画面：終了（Export UI）
+# 解説表示
+# =======================
+def render_explain(i: int):
+    st.subheader(f"解説 {i}")
+    rows = rows_for_id(i)
+
+    # CSV内に動画リンクがあれば表示
+    video_links = [as_str(v) for v in rows["解説動画"].tolist() if isinstance(v, str) and v.strip()]
+    if video_links:
+        st.markdown(f"[🎬 解説動画を見る]({video_links[0]})", unsafe_allow_html=True)
+
+    if i in solutions:
+        download_and_open_pdf(solutions[i])
+    else:
+        st.info("解説PDFが見つかりません。")
+
+    st.divider()
+
+    # 次の問題または終了
+    if ss.current_id_idx + 1 < len(available_ids):
+        if st.button("次の問題へ ▶"):
+            ss.current_id_idx += 1
+            ss.problem_start_time = time.time()
+            ss.pdf_opened = False
+            ss.phase = "problem"
+            st.rerun()
+    else:
+        st.success("全ての問題が終了しました。結果画面に移動します。")
+        ss.phase = "end"
+        st.rerun()
+
+# =======================
+# 終了画面
 # =======================
 def render_end():
     st.subheader("終了")
-    st.write("結果のCSVをダウンロードできます。")
-    ss.user_name = st.text_input("氏名を入力してください", value=ss.user_name, placeholder="例）千葉 太郎")
+    st.write("結果をダウンロードできます。")
 
-    rows: List[Dict] = []
-    for (ID, sub) in sorted(ss.answers.keys(), key=lambda t: (int(t[0]), str(t[1]))):
-        rec = ss.answers[(ID, sub)]
+    ss.user_name = st.text_input("氏名を入力してください", value=ss.user_name)
+    rows = []
+    for (ID, sub), rec in ss.answers.items():
         rows.append({
             "タイトル": rec.get("タイトル", ""),
             "小問": sub,
             "難易度": rec.get("難易度", ""),
             "正誤": "正解" if rec.get("判定","") == "正解！" else "不正解",
-            "経過時間": seconds_to_hms(int(rec.get("経過秒", 0))),
-            "累計時間": seconds_to_hms(int(rec.get("累計秒", 0))),
-            "入力": rec.get("入力", ""),
-            "正解": rec.get("正解", ""),
+            "経過時間": seconds_to_hms(int(rec.get("経過秒",0))),
+            "累計時間": seconds_to_hms(int(rec.get("累計秒",0))),
+            "入力": rec.get("入力",""),
+            "正解": rec.get("正解",""),
             "ID": ID,
         })
-    result_df = pd.DataFrame(rows, columns=["タイトル","小問","難易度","正誤","経過時間","累計時間","入力","正解","ID"])
-    st.dataframe(result_df, use_container_width=True, hide_index=True)
+    df = pd.DataFrame(rows, columns=["タイトル","小問","難易度","正誤","経過時間","累計時間","入力","正解","ID"])
+    st.dataframe(df, hide_index=True, use_container_width=True)
 
     if ss.user_name:
-        timestamp = datetime.now(JST).strftime("%Y%m%d_%H%M%S")
-        out_name = f"{ss.user_name}_結果_{timestamp}.csv"
         buf = io.StringIO()
-        export_cols = ["タイトル","小問","難易度","正誤","経過時間","累計時間"]
-        result_df[export_cols].to_csv(buf, index=False, encoding="utf-8-sig")
-        st.download_button("結果CSVをダウンロード", buf.getvalue().encode("utf-8-sig"), file_name=out_name, mime="text/csv")
+        timestamp = datetime.now(JST).strftime("%Y%m%d_%H%M%S")
+        filename = f"{ss.user_name}_結果_{timestamp}.csv"
+        df.to_csv(buf, index=False, encoding="utf-8-sig")
+        st.download_button("結果CSVをダウンロード", buf.getvalue().encode("utf-8-sig"), file_name=filename, mime="text/csv")
     else:
-        st.info("氏名を入力するとダウンロードできます。")
+        st.info("氏名を入力するとCSVをダウンロードできます。")
 
-    st.button("はじめから", on_click=lambda: [ss.clear()])
+    st.button("はじめから", on_click=lambda: ss.clear())
 
-# ==============
-# ルーター
-# ==============
+# =======================
+# ページルーター
+# =======================
 current_id = get_current_id()
 if current_id is None:
-    st.error("CSV内に有効な ID が見つかりません。CSV の『ID』列をご確認ください。")
+    st.error("CSVのIDが不正です。")
     st.stop()
 
-st.caption(f"進行状況： {ss.current_id_idx+1} / {len(available_ids)} 　｜　現在ID：{current_id}")
+st.caption(f"進行状況： {ss.current_id_idx+1}/{len(available_ids)}　｜　現在ID：{current_id}")
 
 if ss.phase == "problem":
     render_problem(current_id)
